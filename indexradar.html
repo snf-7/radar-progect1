@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>رادار · Radar — محرك تقييم مخاطر لحظي</title>
+
+<!-- Tailwind عبر CDN -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: { safe: '#00E5A0', review: '#FFB020', fraud: '#FF4D5E', ink: '#0a0e1a' },
+        fontFamily: {
+          sans: ['"IBM Plex Sans Arabic"', 'Tajawal', 'sans-serif'],
+          mono: ['"JetBrains Mono"', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<!-- الخطوط -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+
+<style>
+  /* ===== خلفية: تدرّج شعاعي + شبكة متحركة + نويز ===== */
+  html { background: #0a0e1a; }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 800px at 70% -10%, #0d1424 0%, #0a0e1a 60%),
+      #0a0e1a;
+    color: #e8ecf4;
+    overflow-x: hidden;
+  }
+  body::before { /* شبكة خفيفة تنزلق ببطء */
+    content: ''; position: fixed; inset: -100px; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.028) 1px, transparent 1px);
+    background-size: 56px 56px;
+    animation: gridPan 60s linear infinite;
+    mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 30%, transparent 100%);
+  }
+  body::after { /* نويز خفيف */
+    content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: .035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  @keyframes gridPan { to { transform: translate(56px, 56px); } }
+
+  main, header, .dock { position: relative; z-index: 1; }
+
+  /* ===== بطاقات زجاجية ===== */
+  .glass {
+    background: rgba(255,255,255,.055);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,.09);
+    border-radius: 1.25rem;
+    box-shadow: 0 12px 40px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+  .glass-inner {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: .9rem;
+  }
+
+  /* ===== ألوان الحالة — توهّج لا تعبئة ===== */
+  .pill { border-radius: 999px; padding: .18rem .7rem; font-weight: 600; font-size: .78rem; border: 1px solid; }
+  .pill-safe   { color: #00E5A0; border-color: rgba(0,229,160,.45);  background: rgba(0,229,160,.08);  box-shadow: 0 0 14px rgba(0,229,160,.22); }
+  .pill-review { color: #FFB020; border-color: rgba(255,176,32,.45); background: rgba(255,176,32,.08); box-shadow: 0 0 14px rgba(255,176,32,.22); }
+  .pill-fraud  { color: #FF4D5E; border-color: rgba(255,77,94,.45);  background: rgba(255,77,94,.08);  box-shadow: 0 0 14px rgba(255,77,94,.25); }
+  .glow-safe   { text-shadow: 0 0 18px rgba(0,229,160,.6); color: #00E5A0; }
+  .glow-review { text-shadow: 0 0 18px rgba(255,176,32,.6); color: #FFB020; }
+  .glow-fraud  { text-shadow: 0 0 18px rgba(255,77,94,.6); color: #FF4D5E; }
+
+  /* وسم reason code — mono إنجليزي دائمًا */
+  .rcode {
+    direction: ltr; font-family: 'JetBrains Mono', monospace; font-size: .72rem; font-weight: 600;
+    padding: .2rem .55rem; border-radius: .5rem; border: 1px solid rgba(255,255,255,.14);
+    background: rgba(255,255,255,.05); letter-spacing: .02em; display: inline-block;
+  }
+  .rcode-danger { color: #FF4D5E; border-color: rgba(255,77,94,.4);  box-shadow: 0 0 10px rgba(255,77,94,.18); }
+  .rcode-warn   { color: #FFB020; border-color: rgba(255,176,32,.4); }
+  .rcode-ok     { color: #00E5A0; border-color: rgba(0,229,160,.35); }
+
+  /* ===== نبضة radar-sweep في الشعار ===== */
+  .radar-sweep { transform-origin: 50% 50%; animation: sweep 3.2s linear infinite; }
+  @keyframes sweep { to { transform: rotate(360deg); } }
+  .radar-ping { animation: ping2 3.2s ease-out infinite; transform-origin: 50% 50%; }
+  @keyframes ping2 { 0% { opacity: .8; transform: scale(.3);} 70% { opacity: 0; transform: scale(1);} 100% { opacity: 0; } }
+
+  /* ===== صفوف التدفّق ===== */
+  .feed-row { animation: rowIn .7s cubic-bezier(.22,1,.36,1); cursor: pointer; transition: background .25s, border-color .25s; }
+  .feed-row:hover { background: rgba(255,255,255,.06) !important; }
+  .feed-row.selected { border-color: rgba(0,229,160,.45) !important; background: rgba(0,229,160,.05) !important; }
+  @keyframes rowIn {
+    0%   { opacity: 0; transform: translateY(-14px); background: rgba(255,255,255,.10); }
+    60%  { opacity: 1; background: rgba(255,255,255,.08); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===== أشرطة الأبعاد ===== */
+  .dim-fill { height: 100%; border-radius: 999px; width: 0%; transition: width .9s cubic-bezier(.22,1,.36,1); }
+
+  /* ===== الخريطة ===== */
+  .arc-path { stroke-dasharray: 1000; stroke-dashoffset: 1000; filter: drop-shadow(0 0 6px rgba(255,77,94,.8)); }
+  .node-dot { filter: drop-shadow(0 0 8px currentColor); }
+  .attacker-flash { animation: flashRed .35s ease-in-out 4; }
+  @keyframes flashRed { 0%,100% { opacity: 1; } 50% { opacity: .15; } }
+  .cust-verify { animation: custPulse 1.4s ease-in-out infinite; }
+  @keyframes custPulse { 0%,100% { opacity: .35; transform: scale(1);} 50% { opacity: 1; transform: scale(1.35);} }
+  .map-banner-in { animation: bannerIn .5s cubic-bezier(.22,1,.36,1); }
+  @keyframes bannerIn { from { opacity: 0; transform: scale(.85);} to { opacity: 1; transform: scale(1);} }
+
+  /* ===== المودال ===== */
+  .modal-backdrop { background: rgba(6,9,18,.72); backdrop-filter: blur(8px); }
+  .modal-in { animation: modalIn .45s cubic-bezier(.22,1,.36,1); }
+  @keyframes modalIn { from { opacity: 0; transform: translateY(26px) scale(.96);} to { opacity: 1; transform: none;} }
+  .shake { animation: shake .4s; }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-7px)} 75%{transform:translateX(7px)} }
+
+  /* FaceID — حلقة مسح */
+  .faceid-ring { stroke-dasharray: 289; stroke-dashoffset: 289; animation: ringScan 2s ease-in-out forwards; }
+  @keyframes ringScan { to { stroke-dashoffset: 0; } }
+  .scan-line { animation: scanY 1s ease-in-out 2 alternate; }
+  @keyframes scanY { from { transform: translateY(-16px);} to { transform: translateY(16px);} }
+
+  /* موجة صوتية للبوت */
+  .wave-bar { animation: wave 1s ease-in-out infinite; transform-origin: bottom; }
+  @keyframes wave { 0%,100% { transform: scaleY(.3);} 50% { transform: scaleY(1);} }
+
+  /* ظهور تدريجي للخطوات */
+  .step-in { animation: stepIn .55s cubic-bezier(.22,1,.36,1) both; }
+  @keyframes stepIn { from { opacity: 0; transform: translateY(12px);} to { opacity: 1; transform: none;} }
+
+  .blink-soft { animation: blinkSoft 1.1s ease-in-out infinite; }
+  @keyframes blinkSoft { 50% { opacity: .45; } }
+
+  /* أزرار */
+  .btn {
+    border-radius: .85rem; padding: .6rem 1.15rem; font-weight: 600; font-size: .9rem;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.06);
+    transition: all .2s; cursor: pointer; color: #e8ecf4;
+  }
+  .btn:hover { background: rgba(255,255,255,.12); transform: translateY(-1px); }
+  .btn-primary { border-color: rgba(0,229,160,.5); color: #00E5A0; background: rgba(0,229,160,.08); box-shadow: 0 0 18px rgba(0,229,160,.15); }
+  .btn-primary:hover { background: rgba(0,229,160,.16); }
+  .btn-danger { border-color: rgba(255,77,94,.5); color: #FF4D5E; background: rgba(255,77,94,.08); box-shadow: 0 0 18px rgba(255,77,94,.15); }
+  .btn-danger:hover { background: rgba(255,77,94,.16); }
+
+  /* شريحة «مستهدف · محاكاة» */
+  .sim-tag {
+    font-size: .62rem; color: rgba(232,236,244,.55); border: 1px solid rgba(255,255,255,.12);
+    border-radius: 999px; padding: .08rem .5rem; white-space: nowrap;
+  }
+
+  /* Dock */
+  .dock { box-shadow: 0 18px 50px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.08); }
+
+  /* أرقام mono دائمًا LTR */
+  .num { font-family: 'JetBrains Mono', monospace; direction: ltr; unicode-bidi: embed; }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 99px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+
+<body class="font-sans antialiased">
+
+<!-- ============================================================
+     1) الشريط العلوي — شعار + KPIs + مبدّل لغة
+============================================================ -->
+<header class="sticky top-0 z-40 px-6 pt-4 pb-3" style="background:linear-gradient(180deg,rgba(10,14,26,.92),rgba(10,14,26,.55) 80%,transparent); backdrop-filter: blur(10px);">
+  <div class="max-w-[1400px] mx-auto flex items-center gap-6">
+
+    <!-- الشعار مع radar-sweep -->
+    <div class="flex items-center gap-3 shrink-0">
+      <svg width="46" height="46" viewBox="0 0 100 100" class="shrink-0">
+        <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(0,229,160,.22)" stroke-width="1.5"/>
+        <circle cx="50" cy="50" r="32" fill="none" stroke="rgba(0,229,160,.18)" stroke-width="1"/>
+        <circle cx="50" cy="50" r="18" fill="none" stroke="rgba(0,229,160,.14)" stroke-width="1"/>
+        <circle cx="50" cy="50" r="46" fill="none" stroke="rgba(0,229,160,.5)" stroke-width="1" class="radar-ping"/>
+        <g class="radar-sweep">
+          <path d="M50 50 L50 4 A46 46 0 0 1 82 17 Z" fill="url(#sweepGrad)"/>
+          <line x1="50" y1="50" x2="50" y2="4" stroke="#00E5A0" stroke-width="2" opacity=".9"/>
+        </g>
+        <circle cx="50" cy="50" r="4" fill="#00E5A0"/>
+        <circle cx="68" cy="30" r="2.6" fill="#FF4D5E" class="blink-soft"/>
+        <defs>
+          <linearGradient id="sweepGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="rgba(0,229,160,.45)"/>
+            <stop offset="100%" stop-color="rgba(0,229,160,0)"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div>
+        <div class="text-xl font-bold tracking-tight">
+          <span data-i18n="brand">رادار</span>
+          <span class="num text-safe text-sm font-semibold ms-1">RADAR</span>
+        </div>
+        <div class="text-[.7rem] text-slate-400" data-i18n="tagline">محرك تقييم مخاطر لحظي · قواعد مرجّحة</div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="flex-1 grid grid-cols-4 gap-3">
+      <div class="glass !rounded-xl px-4 py-2.5 flex flex-col justify-center">
+        <div class="text-[.68rem] text-slate-400 flex items-center gap-2">
+          <span data-i18n="kpiFalseAlarms">إنذارات كاذبة تم تفاديها</span>
+          <span class="sim-tag" data-i18n="simTag">مستهدف · محاكاة</span>
+        </div>
+        <div class="num text-xl font-bold text-safe" id="kpiFalseAlarms">0</div>
+      </div>
+      <div class="glass !rounded-xl px-4 py-2.5 flex flex-col justify-center">
+        <div class="text-[.68rem] text-slate-400 flex items-center gap-2">
+          <span data-i18n="kpiCostSaved">تكلفة موفّرة (ريال)</span>
+          <span class="sim-tag" data-i18n="simTag">مستهدف · محاكاة</span>
+        </div>
+        <div class="num text-xl font-bold text-safe" id="kpiCostSaved">0</div>
+      </div>
+      <div class="glass !rounded-xl px-4 py-2.5 flex flex-col justify-center">
+        <div class="text-[.68rem] text-slate-400" data-i18n="kpiTps">معاملات / ثانية</div>
+        <div class="num text-xl font-bold" id="kpiTps">0</div>
+      </div>
+      <div class="glass !rounded-xl px-4 py-2.5 flex flex-col justify-center">
+        <div class="text-[.68rem] text-slate-400 flex items-center gap-2">
+          <span data-i18n="kpiLatency">متوسط زمن الاستجابة</span>
+          <span class="sim-tag" data-i18n="simTag">مستهدف · محاكاة</span>
+        </div>
+        <div class="num text-xl font-bold">~<span id="kpiLatency">80</span>ms</div>
+      </div>
+    </div>
+
+    <!-- مبدّل اللغة -->
+    <button id="langToggle" class="btn num shrink-0 !px-4" title="Language">
+      <span id="langLabel">EN</span>
+    </button>
+  </div>
+</header>
+
+<main class="max-w-[1400px] mx-auto px-6 pb-40 space-y-6">
+
+  <!-- ============================================================
+       2 + 3) التدفّق المباشر + لوحة محرك رادار
+  ============================================================ -->
+  <section class="grid grid-cols-12 gap-6">
+
+    <!-- 2) التدفّق المباشر -->
+    <div class="col-span-5 glass p-5 flex flex-col" style="height: 660px;">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-bold" data-i18n="feedTitle">التدفّق المباشر للمعاملات</h2>
+        <div class="flex items-center gap-2">
+          <span id="feedLiveDot" class="w-2 h-2 rounded-full bg-safe" style="box-shadow:0 0 10px #00E5A0;"></span>
+          <span class="text-xs text-slate-400 num" id="feedStatus" data-i18n="feedLive">LIVE</span>
+        </div>
+      </div>
+      <div class="grid grid-cols-[1fr_auto_auto] gap-2 px-3 pb-2 text-[.68rem] text-slate-500 border-b border-white/5">
+        <span data-i18n="colTxn">المعاملة</span>
+        <span data-i18n="colAmount">المبلغ</span>
+        <span data-i18n="colScore">الخطر</span>
+      </div>
+      <div id="feedList" class="flex-1 overflow-y-auto pt-2 space-y-2 pe-1"></div>
+      <div class="pt-3 text-[.68rem] text-slate-500 flex items-center gap-2 border-t border-white/5 mt-2">
+        <span data-i18n="feedHint">انقر أي معاملة لفتح تحليلها في محرك رادار ←</span>
+      </div>
+    </div>
+
+    <!-- 3) لوحة محرك رادار -->
+    <div class="col-span-7 glass p-5 flex flex-col" style="height: 660px;">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-bold" data-i18n="engineTitle">محرك رادار — التحليل عبر 4 أبعاد</h2>
+        <div class="flex items-center gap-2">
+          <span class="sim-tag"><span class="num">92%</span> <span data-i18n="precisionTag">دقة مستهدفة · محاكاة</span></span>
+        </div>
+      </div>
+      <p class="text-[.72rem] text-slate-400 mb-4" data-i18n="engineSub">تقييم لحظي قائم على قواعد مرجّحة (weighted rules) — وليس نموذج تعلّم آلي مدرّب.</p>
+
+      <!-- حالة فارغة -->
+      <div id="enginePlaceholder" class="flex-1 flex flex-col items-center justify-center text-slate-500 gap-3">
+        <svg width="70" height="70" viewBox="0 0 100 100" opacity=".35">
+          <circle cx="50" cy="50" r="46" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="50" cy="50" r="28" fill="none" stroke="currentColor" stroke-width="1"/>
+          <circle cx="50" cy="50" r="4" fill="currentColor"/>
+        </svg>
+        <span data-i18n="enginePlaceholder">اختر معاملة من التدفّق لعرض تحليلها</span>
+      </div>
+
+      <!-- محتوى التحليل -->
+      <div id="engineContent" class="flex-1 hidden flex-col gap-3 overflow-y-auto pe-1">
+        <!-- رأس المعاملة -->
+        <div class="glass-inner p-3 flex items-center justify-between">
+          <div>
+            <div class="font-bold" id="engTxnTitle">—</div>
+            <div class="text-[.72rem] text-slate-400" id="engTxnMeta">—</div>
+          </div>
+          <div class="text-end">
+            <div class="num text-3xl font-bold" id="engComposite">0</div>
+            <div id="engVerdict" class="pill pill-safe inline-block mt-1">—</div>
+          </div>
+        </div>
+
+        <!-- الأبعاد الأربعة -->
+        <div id="engDims" class="space-y-2.5"></div>
+
+        <!-- تكوين الدرجة -->
+        <div class="glass-inner p-3">
+          <div class="text-[.7rem] text-slate-400 mb-1" data-i18n="compositeLabel">تكوين الدرجة المركّبة</div>
+          <div class="num text-sm font-semibold" id="engFormula">—</div>
+          <div class="flex items-center gap-3 mt-2 text-[.66rem] text-slate-500">
+            <span><span class="inline-block w-2 h-2 rounded-full bg-fraud me-1"></span><span class="num">≥ 70</span> <span data-i18n="thFraud">احتيال</span></span>
+            <span><span class="inline-block w-2 h-2 rounded-full bg-review me-1"></span><span class="num">40–69</span> <span data-i18n="thReview">مراجعة</span></span>
+            <span><span class="inline-block w-2 h-2 rounded-full bg-safe me-1"></span><span class="num">&lt; 40</span> <span data-i18n="thSafe">آمنة</span></span>
+          </div>
+        </div>
+
+        <!-- reason codes + زمن -->
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1">
+            <div class="text-[.7rem] text-slate-400 mb-1.5">Reason Codes</div>
+            <div id="engReasons" class="flex flex-wrap gap-1.5"></div>
+          </div>
+          <div class="glass-inner px-4 py-2.5 text-center shrink-0">
+            <div class="text-[.66rem] text-slate-400" data-i18n="latencyLabel">زمن القرار</div>
+            <div class="num text-2xl font-bold text-safe"><span id="engLatency">0</span><span class="text-sm">ms</span></div>
+            <div class="text-[.6rem] text-slate-500 num">&lt; 80ms SLA</div>
+          </div>
+        </div>
+
+        <!-- زر التحقّق المتدرّج (يظهر عند review/fraud) -->
+        <button id="engVerifyBtn" class="btn btn-primary hidden w-full" data-i18n="runVerify">تشغيل التحقّق الصامت المتدرّج</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       4) الخريطة العالمية للتهديدات — عرض المهاجم
+  ============================================================ -->
+  <section id="mapSection" class="glass p-6">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-lg font-bold" data-i18n="mapTitle">الخريطة العالمية للتهديدات — عرض المهاجم</h2>
+        <p class="text-[.72rem] text-slate-400" data-i18n="mapSub">سيناريو: مهاجم في لندن يحاول الدخول على حساب عميل في الرياض</p>
+      </div>
+      <!-- المؤقّت الكبير -->
+      <div class="glass-inner px-6 py-3 text-center">
+        <div class="text-[.68rem] text-slate-400" data-i18n="mapTimerLabel">زمن الكشف والتجميد</div>
+        <div class="num text-4xl font-bold" id="mapTimer">0<span class="text-lg">ms</span></div>
+      </div>
+    </div>
+
+    <div class="relative">
+      <svg id="worldMap" viewBox="0 0 1000 500" class="w-full rounded-xl" style="background:radial-gradient(700px 350px at 60% 35%, rgba(0,229,160,.04), transparent), rgba(255,255,255,.02); border:1px solid rgba(255,255,255,.06);">
+        <!-- قارّات مبسّطة (زخرفية) -->
+        <g fill="rgba(255,255,255,.045)" stroke="rgba(255,255,255,.09)" stroke-width="1" stroke-linejoin="round">
+          <path d="M 60 120 L 110 70 L 200 55 L 260 75 L 300 65 L 330 95 L 300 130 L 310 160 L 270 200 L 240 235 L 210 220 L 160 190 L 120 170 L 80 150 Z"/>
+          <path d="M 320 42 L 372 30 L 396 56 L 360 86 L 326 70 Z"/>
+          <path d="M 255 255 L 300 245 L 330 280 L 320 330 L 295 390 L 275 430 L 262 380 L 250 320 Z"/>
+          <path d="M 465 130 L 490 95 L 520 80 L 556 84 L 576 105 L 560 130 L 586 145 L 556 160 L 520 156 L 490 160 Z"/>
+          <path d="M 465 175 L 520 165 L 560 180 L 586 220 L 576 265 L 545 320 L 520 360 L 500 330 L 480 280 L 460 230 Z"/>
+          <path d="M 560 85 L 620 60 L 700 55 L 780 70 L 850 90 L 900 120 L 870 160 L 820 190 L 770 222 L 730 250 L 700 220 L 660 200 L 620 180 L 590 150 L 575 120 Z"/>
+          <ellipse cx="790" cy="268" rx="26" ry="10"/>
+          <ellipse cx="838" cy="286" rx="16" ry="7"/>
+          <path d="M 790 312 L 850 300 L 886 330 L 866 366 L 815 370 L 786 345 Z"/>
+        </g>
+
+        <!-- قوس السفر المستحيل: الرياض ↔ لندن -->
+        <path id="attackArc" class="arc-path" d="M 500 107 Q 566 48 630 181" fill="none" stroke="#FF4D5E" stroke-width="2.5" opacity="0"/>
+        <circle id="arcComet" r="4" fill="#FF4D5E" opacity="0" style="filter:drop-shadow(0 0 8px #FF4D5E);"/>
+
+        <!-- لندن — المهاجم -->
+        <g id="nodeLondon">
+          <circle id="londonPulse" cx="500" cy="107" r="10" fill="none" stroke="#FF4D5E" stroke-width="1.5" opacity="0"/>
+          <circle id="londonDot" cx="500" cy="107" r="6" fill="#FF4D5E" class="node-dot" style="color:#FF4D5E;" opacity=".85"/>
+          <text id="londonLock" x="500" y="112" text-anchor="middle" font-size="9" opacity="0">🔒</text>
+          <text x="500" y="88" text-anchor="middle" fill="#FF4D5E" font-size="13" font-weight="700" style="font-family:'IBM Plex Sans Arabic',sans-serif;" id="londonLabel">لندن · المهاجم</text>
+        </g>
+
+        <!-- الرياض — العميل -->
+        <g id="nodeRiyadh">
+          <circle id="riyadhHalo" cx="630" cy="181" r="14" fill="none" stroke="#00E5A0" stroke-width="1.5" opacity="0"/>
+          <circle cx="630" cy="181" r="6" fill="#00E5A0" class="node-dot" style="color:#00E5A0;"/>
+          <text x="630" y="208" text-anchor="middle" fill="#00E5A0" font-size="13" font-weight="700" style="font-family:'IBM Plex Sans Arabic',sans-serif;" id="riyadhLabel">الرياض · العميل</text>
+          <text id="riyadhVerify" x="630" y="224" text-anchor="middle" fill="#FFB020" font-size="11" font-weight="600" opacity="0" style="font-family:'IBM Plex Sans Arabic',sans-serif;">📲 طلب تحقّق</text>
+        </g>
+
+        <!-- مسافة القوس -->
+        <text id="arcDistance" x="560" y="66" text-anchor="middle" fill="rgba(255,77,94,.9)" font-size="11" font-weight="600" class="num" opacity="0">4,930 km / 41 min ⇒ impossible</text>
+      </svg>
+
+      <!-- لافتة القرار -->
+      <div id="mapVerdict" class="hidden absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div class="map-banner-in glass px-8 py-4 text-center" style="border-color:rgba(255,77,94,.5); box-shadow:0 0 60px rgba(255,77,94,.25);">
+          <div class="num text-2xl font-bold glow-fraud">GEO_VELOCITY_IMPOSSIBLE → FREEZE</div>
+          <div class="text-sm text-slate-300 mt-1"><span data-i18n="mapFrozen">تم تجميد الجلسة خلال</span> <span class="num text-safe font-bold">73ms</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================
+       6) مقارنة «بنك تقليدي ضد رادار» — الإنذار الكاذب
+  ============================================================ -->
+  <section id="compareSection" class="glass p-6">
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <h2 class="text-lg font-bold" data-i18n="cmpTitle">بنك تقليدي ضد رادار — سيناريو الإنذار الكاذب</h2>
+        <p class="text-[.72rem] text-slate-400" data-i18n="cmpSub">عميل شرعي يمرّر بطاقته في مطار دبي الدولي (DXB)</p>
+      </div>
+      <div class="flex items-center gap-4">
+        <div class="glass-inner px-4 py-2 text-center">
+          <div class="text-[.62rem] text-slate-400" data-i18n="cmpRetained">العملاء المحتفظ بهم</div>
+          <div class="num text-lg font-bold text-safe" id="cmpRetainedCount">0</div>
+        </div>
+        <div class="glass-inner px-4 py-2 text-center">
+          <div class="text-[.62rem] text-slate-400" data-i18n="cmpRevenue">الإيراد المحمي (ريال)</div>
+          <div class="num text-lg font-bold text-safe" id="cmpRevenueCount">0</div>
+        </div>
+        <button id="btnRunCompare" class="btn btn-primary" data-i18n="cmpRun">▶ تشغيل سيناريو الإنذار الكاذب</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-5">
+      <!-- بنك تقليدي -->
+      <div class="glass-inner p-5" style="min-height: 330px;">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-bold text-slate-300" data-i18n="cmpLegacy">🏦 بنك تقليدي</h3>
+          <span class="num text-[.66rem] text-slate-500">RULE: FOREIGN_SWIPE → BLOCK</span>
+        </div>
+        <div id="legacyStage" class="space-y-2.5"></div>
+        <div id="legacyResult" class="hidden mt-4 text-center p-5 rounded-xl" style="border:1px solid rgba(255,77,94,.45); background:rgba(255,77,94,.06); box-shadow:0 0 40px rgba(255,77,94,.15) inset;">
+          <div class="text-3xl font-bold glow-fraud" data-i18n="cmpBlocked">⛔ بطاقة محظورة</div>
+          <div class="mt-2 text-sm text-slate-300">
+            <span data-i18n="cmpAgentCall">تم إرسال مكالمة وكيل:</span>
+            <span class="num font-bold text-fraud text-xl"><span id="legacyCost">0.00</span> <span data-i18n="sar">ريال</span></span>
+          </div>
+          <div class="mt-1 text-[.72rem] text-slate-400" data-i18n="cmpAngry">😠 عميل محبط · خطر إلغاء البطاقة</div>
+        </div>
+      </div>
+
+      <!-- رادار -->
+      <div class="glass-inner p-5" style="min-height: 330px;">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-bold text-safe" data-i18n="cmpRadar">📡 رادار</h3>
+          <span class="num text-[.66rem] text-slate-500">WEIGHTED RULES · 73ms</span>
+        </div>
+        <div id="radarStage" class="space-y-2.5"></div>
+        <div id="radarResult" class="hidden mt-4 text-center p-5 rounded-xl" style="border:1px solid rgba(0,229,160,.45); background:rgba(0,229,160,.06); box-shadow:0 0 40px rgba(0,229,160,.15) inset;">
+          <div class="text-3xl font-bold glow-safe" data-i18n="cmpKept">✓ تم الاحتفاظ بالعميل</div>
+          <div class="mt-2 flex items-center justify-center gap-6 text-sm">
+            <div><span class="text-slate-400" data-i18n="cmpCost">التكلفة:</span> <span class="num font-bold text-safe text-xl">0.05</span> <span data-i18n="sar">ريال</span> <span class="sim-tag" data-i18n="simTag">مستهدف · محاكاة</span></div>
+            <div><span class="text-slate-400" data-i18n="cmpFriction">الاحتكاك:</span> <span class="font-bold text-safe" data-i18n="cmpZero">صفر</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============================================================
+     5) مودال التحقّق الصامت المتدرّج
+============================================================ -->
+<div id="verifyModal" class="hidden fixed inset-0 z-50 modal-backdrop flex items-center justify-center p-6">
+  <div class="glass modal-in w-full max-w-lg p-6 relative">
+    <button id="modalClose" class="absolute top-4 end-4 text-slate-400 hover:text-white text-xl leading-none">✕</button>
+
+    <h3 class="text-lg font-bold mb-1" data-i18n="modalTitle">التحقّق الصامت المتدرّج</h3>
+    <p class="text-[.72rem] text-slate-400 mb-4 num" id="modalContext">TXN #F-88231 · 48,750 SAR</p>
+
+    <!-- مؤشّر الطبقات -->
+    <div class="flex items-center gap-0 mb-5" dir="ltr">
+      <div class="tier-step flex items-center gap-2" data-tier="1">
+        <div class="tier-dot w-8 h-8 rounded-full flex items-center justify-center num font-bold border border-white/20 bg-white/5">1</div>
+        <span class="text-[.68rem] text-slate-400 tier-name" data-i18n="tier1Name">تحقّق صامت</span>
+      </div>
+      <div class="flex-1 h-px bg-white/15 mx-3"></div>
+      <div class="tier-step flex items-center gap-2" data-tier="2">
+        <div class="tier-dot w-8 h-8 rounded-full flex items-center justify-center num font-bold border border-white/20 bg-white/5">2</div>
+        <span class="text-[.68rem] text-slate-400 tier-name" data-i18n="tier2Name">نفاذ</span>
+      </div>
+      <div class="flex-1 h-px bg-white/15 mx-3"></div>
+      <div class="tier-step flex items-center gap-2" data-tier="3">
+        <div class="tier-dot w-8 h-8 rounded-full flex items-center justify-center num font-bold border border-white/20 bg-white/5">3</div>
+        <span class="text-[.68rem] text-slate-400 tier-name" data-i18n="tier3Name">بوت صوتي</span>
+      </div>
+    </div>
+
+    <!-- ===== Tier 1: تحقّق صامت (FaceID / FIDO2) ===== -->
+    <div id="tier1" class="tier-panel">
+      <div class="glass-inner p-6 flex flex-col items-center gap-4">
+        <div class="relative">
+          <svg width="96" height="96" viewBox="0 0 96 96">
+            <circle cx="48" cy="48" r="46" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2"/>
+            <circle id="faceRing" cx="48" cy="48" r="46" fill="none" stroke="#00E5A0" stroke-width="2.5"
+                    stroke-linecap="round" transform="rotate(-90 48 48)" class="faceid-ring" style="filter:drop-shadow(0 0 8px rgba(0,229,160,.6));"/>
+            <!-- وجه مبسّط -->
+            <g stroke="rgba(232,236,244,.85)" stroke-width="2.4" stroke-linecap="round" fill="none">
+              <path d="M32 36 v8"/><path d="M64 36 v8"/>
+              <path d="M48 38 v12 h-5"/>
+              <path d="M36 60 q12 9 24 0"/>
+            </g>
+            <g id="faceScanLine" class="scan-line">
+              <line x1="26" y1="48" x2="70" y2="48" stroke="#00E5A0" stroke-width="1.5" opacity=".85" style="filter:drop-shadow(0 0 6px #00E5A0);"/>
+            </g>
+          </svg>
+          <div id="faceCheck" class="hidden absolute inset-0 flex items-center justify-center text-5xl glow-safe">✓</div>
+        </div>
+        <div class="text-center">
+          <div class="font-bold" id="tier1Status" data-i18n="tier1Scanning">تحقّق حيوي مربوط بالجهاز…</div>
+          <div class="num text-[.68rem] text-slate-400 mt-1">FIDO2 / Passkey · Device-bound biometric</div>
+        </div>
+        <div id="tier1Verdict" class="hidden text-center step-in">
+          <div class="flex items-center justify-center gap-3">
+            <span class="pill pill-safe num text-sm">APPROVED</span>
+            <span class="pill pill-fraud num text-sm">ATTACKER BLOCKED 🔒</span>
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button id="btnIgnorePush" class="btn flex-1" data-i18n="btnIgnore">تجاهل الإشعار → التصعيد لنفاذ</button>
+      </div>
+    </div>
+
+    <!-- ===== Tier 2: نفاذ (Nafath) ===== -->
+    <div id="tier2" class="tier-panel hidden">
+      <div class="glass-inner p-6" style="border-color:rgba(0,229,160,.25);">
+        <div class="flex items-center justify-between mb-4">
+          <div class="font-bold text-safe">نفاذ <span class="num text-xs">Nafath</span></div>
+          <span class="sim-tag" data-i18n="tier2Gov">توثيق حكومي · للمعاملات عالية القيمة</span>
+        </div>
+        <p class="text-sm text-slate-300 mb-1" data-i18n="tier2Prompt">الرمز الظاهر في تطبيق البنك:</p>
+        <div class="num text-5xl font-bold text-center my-4 glow-safe">42</div>
+        <p class="text-[.72rem] text-slate-400 mb-3 text-center" data-i18n="tier2Pick">اختر الرمز المطابق في تطبيق نفاذ:</p>
+        <div class="grid grid-cols-3 gap-3" dir="ltr">
+          <button class="btn num text-2xl !py-4 nafath-opt" data-code="17">17</button>
+          <button class="btn num text-2xl !py-4 nafath-opt" data-code="42">42</button>
+          <button class="btn num text-2xl !py-4 nafath-opt" data-code="63">63</button>
+        </div>
+        <div id="tier2Verdict" class="hidden text-center mt-4 step-in">
+          <span class="pill pill-safe num text-sm">NAFATH_VERIFIED ✓ · APPROVED</span>
+        </div>
+        <div id="tier2Wrong" class="hidden text-center mt-3 text-fraud text-sm" data-i18n="tier2Wrong">رمز غير مطابق — حاول مرة أخرى</div>
+      </div>
+      <div class="flex gap-3 mt-4">
+        <button id="btnNoNafath" class="btn flex-1" data-i18n="btnNoNafath">لم تصلك المطابقة؟ → اتصال آلي تنبيهي</button>
+      </div>
+    </div>
+
+    <!-- ===== Tier 3: بوت صوتي ===== -->
+    <div id="tier3" class="tier-panel hidden">
+      <div class="glass-inner p-6">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-3">
+            <div class="w-11 h-11 rounded-full flex items-center justify-center text-xl" style="background:rgba(0,229,160,.1); border:1px solid rgba(0,229,160,.35);">📞</div>
+            <div>
+              <div class="font-bold" data-i18n="tier3Calling">مكالمة تنبيه آلية — رادار</div>
+              <div class="num text-[.66rem] text-slate-400">920-00-XXXX · Verified Caller</div>
+            </div>
+          </div>
+          <!-- موجة صوتية -->
+          <div class="flex items-end gap-1 h-8" dir="ltr">
+            <div class="wave-bar w-1.5 h-8 rounded bg-safe" style="animation-delay:0s"></div>
+            <div class="wave-bar w-1.5 h-8 rounded bg-safe" style="animation-delay:.15s"></div>
+            <div class="wave-bar w-1.5 h-8 rounded bg-safe" style="animation-delay:.3s"></div>
+            <div class="wave-bar w-1.5 h-8 rounded bg-safe" style="animation-delay:.45s"></div>
+            <div class="wave-bar w-1.5 h-8 rounded bg-safe" style="animation-delay:.6s"></div>
+          </div>
+        </div>
+
+        <div class="p-4 rounded-xl text-sm leading-relaxed" style="background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08);" data-i18n="tier3Script">
+          «هذه مكالمة تنبيه آلية من رادار. لن نطلب منك أي رمز أو كلمة مرور أو معلومات — إطلاقًا.
+          يرجى فتح تطبيق البنك لإكمال التأكيد داخل التطبيق فقط.»
+        </div>
+
+        <div class="flex items-center gap-2 mt-4">
+          <span class="rcode rcode-ok">SIM_SWAP_DEFENSE · Tahaqaq ✓</span>
+        </div>
+        <p class="text-[.7rem] text-slate-400 mt-2" data-i18n="tier3SimNote">
+          قبل الاتصال، تم فحص ربط الرقم بالشريحة عبر خدمة «تحقّق» للتأكد من عدم حدوث تبديل شريحة (SIM Swap) حديث.
+          المكالمة تنبيه فقط — لا يتم أي تحقّق عبر المكالمة.
+        </p>
+
+        <button id="btnTier3App" class="btn btn-primary w-full mt-4" data-i18n="tier3Open">فتح التطبيق لإكمال التأكيد</button>
+        <div id="tier3Verdict" class="hidden text-center mt-3 step-in">
+          <span class="pill pill-safe num text-sm">IN_APP_CONFIRMED ✓ · APPROVED</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     لوحة تشغيل العرض — Dock عائم
+============================================================ -->
+<div class="dock glass fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-3 flex items-center gap-3">
+  <button id="btnScenarioFraud" class="btn btn-danger" data-i18n="dockFraud">▶ سيناريو الاحتيال (الرياض ← لندن)</button>
+  <button id="btnScenarioFP" class="btn btn-primary" data-i18n="dockFP">▶ سيناريو الإنذار الكاذب (دبي)</button>
+  <div class="w-px h-7 bg-white/15"></div>
+  <button id="btnPauseFeed" class="btn"><span id="pauseLabel" data-i18n="dockPause">⏸ إيقاف التدفّق</span></button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
